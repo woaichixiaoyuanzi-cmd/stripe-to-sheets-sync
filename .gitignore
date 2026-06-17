@@ -1,0 +1,12 @@
+# 绝对不能泄露的秘钥文件
+.env
+credentials.json
+
+# 二进制可执行文件与缓存
+stripe.exe
+__pycache__/
+*.pyc
+
+# 虚拟环境 (如果你用了的话)
+venv/
+env/

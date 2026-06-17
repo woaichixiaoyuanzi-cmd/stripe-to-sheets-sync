@@ -45,20 +45,30 @@ async def stripe_webhook(request: Request, stripe_signature: str = Header(None))
         customer_details = getattr(session, 'customer_details', None)
         email = getattr(customer_details, 'email', 'No email') if customer_details else 'No email'
 
-        amount = getattr(session, 'amount_total', 0) / 100.0
+        # 获取货币种类并转换为大写
         currency = getattr(session, 'currency', '').upper()
+        raw_amount = getattr(session, 'amount_total', 0)
+
+        # 智能处理零小数货币 (Zero-decimal currencies)
+        zero_decimal_currencies = ['JPY', 'KRW', 'VND', 'CLP', 'PYG']
+        if currency in zero_decimal_currencies:
+            amount = float(raw_amount)  # 日元等不需要除以 100
+        else:
+            amount = raw_amount / 100.0  # 美元等需要除以 100
+
         status = getattr(session, 'payment_status', 'Unknown')
         time_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        print(f"💰 捕捉到支付! 用户: {email}, 金额: {amount} {currency}")
+        # 纯英文专业日志
+        print(f"💰 Payment captured! User: {email}, Amount: {amount} {currency}")
 
         # 5. 瞬间写入 Google Sheets
         try:
             sheet = gc.open("Stripe Sync Test").sheet1
             row_data = [time_now, email, amount, currency, status]
             sheet.append_row(row_data)
-            print("✅ 成功写入 Google Sheets!")
+            print("✅ Successfully written to Google Sheets!")
         except Exception as e:
-            print(f"❌ 写入表格失败: {e}")
+            print(f"❌ Failed to write to sheets: {e}")
 
     return {"status": "success"}

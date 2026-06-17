@@ -35,12 +35,15 @@ async def stripe_webhook(request: Request, stripe_signature: str = Header(None))
     try:
         event = stripe.Webhook.construct_event(payload, stripe_signature, endpoint_secret)
     except Exception as e:
-        print(f"❌ 签名验证失败: {e}")
+        print(f"❌ Signature verification failed: {e}")
         raise HTTPException(status_code=400, detail="Invalid signature or payload")
 
     # 4. 捕捉支付成功事件并提取核心数据
     if event.type == 'checkout.session.completed':
         session = event.data.object
+
+        # 提取事件的全局唯一 ID (用于防重复)
+        event_id = event.id
 
         customer_details = getattr(session, 'customer_details', None)
         email = getattr(customer_details, 'email', 'No email') if customer_details else 'No email'
@@ -59,15 +62,25 @@ async def stripe_webhook(request: Request, stripe_signature: str = Header(None))
         status = getattr(session, 'payment_status', 'Unknown')
         time_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # 纯英文专业日志
         print(f"💰 Payment captured! User: {email}, Amount: {amount} {currency}")
 
-        # 5. 瞬间写入 Google Sheets
+        # 5. 幂等性校验与写入 Google Sheets
         try:
             sheet = gc.open("Stripe Sync Test").sheet1
-            row_data = [time_now, email, amount, currency, status]
+
+            # 【核心防御】读取第一列（A列）现有的所有 Event ID
+            existing_ids = sheet.col_values(1)
+
+            # 如果这个订单号已经存在，直接丢弃并返回成功告诉 Stripe 不要再发了
+            if event_id in existing_ids:
+                print(f"⚠️ Duplicate Webhook intercepted! Event ID {event_id} already exists. Skipping.")
+                return {"status": "success", "detail": "Already processed"}
+
+            # 组装数据，把 event_id 放在第一列
+            row_data = [event_id, time_now, email, amount, currency, status]
             sheet.append_row(row_data)
             print("✅ Successfully written to Google Sheets!")
+
         except Exception as e:
             print(f"❌ Failed to write to sheets: {e}")
 
